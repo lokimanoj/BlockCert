@@ -1,0 +1,4407 @@
+﻿BLOCKCERT REDIRECT AUDIT
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\admin\dashboard\page.tsx ==========
+
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { ReactNode } from "react";
+import {
+  ShieldCheck,
+  Building2,
+  Clock,
+  CheckCircle,
+  XCircle,
+  RefreshCw,
+  LogOut,
+  LayoutDashboard,
+  Users,
+  Power,
+  Search,
+  Eye,
+  X,
+  Mail,
+  Phone,
+  MapPin,
+  Calendar,
+  ArrowLeft,
+} from "lucide-react";
+
+const API = "http://localhost:5000/api";
+
+type Institution = {
+  _id: string;
+  institutionName: string;
+  institutionCode: string;
+  email: string;
+  phone: string;
+  address: string;
+  website?: string;
+  isApproved: boolean;
+  isActive: boolean;
+  createdAt: string;
+};
+
+type FilterType = "all" | "pending" | "approved" | "rejected" | "inactive";
+type ViewType = "dashboard" | "institutions";
+
+export default function AdminDashboard() {
+  const router = useRouter();
+
+  const [institutions, setInstitutions] = useState<Institution[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState("");
+  const [error, setError] = useState("");
+  const [adminName, setAdminName] = useState("System Admin");
+
+  const [activeView, setActiveView] = useState<ViewType>("dashboard");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<FilterType>("all");
+  const [selectedInstitution, setSelectedInstitution] =
+    useState<Institution | null>(null);
+
+  const fetchInstitutions = useCallback(async () => {
+    const token = localStorage.getItem("blockcert_token");
+    const storedUser = localStorage.getItem("blockcert_user");
+
+    if (!token || !storedUser) {
+      router.replace("/admin/login");
+      return;
+    }
+
+    try {
+      const user = JSON.parse(storedUser);
+
+      if (user.role !== "admin") {
+        router.replace("/");
+        return;
+      }
+
+      setAdminName(user.name || "System Admin");
+
+      const response = await fetch(`${API}/admin/institutions`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          localStorage.removeItem("blockcert_token");
+          localStorage.removeItem("blockcert_user");
+          router.replace("/admin/login");
+          return;
+        }
+
+        throw new Error(data.message || "Unable to load institutions");
+      }
+
+      setInstitutions(data.institutions || []);
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Something went wrong"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    fetchInstitutions();
+  }, [fetchInstitutions]);
+
+  // Institution approval and rejection
+  const handleInstitutionAction = async (
+    institutionId: string,
+    action: "approve" | "reject"
+  ) => {
+    const token = localStorage.getItem("blockcert_token");
+
+    if (!token) {
+      router.replace("/admin/login");
+      return;
+    }
+
+    let rejectionReason = "";
+
+    if (action === "reject") {
+      const reason = window.prompt(
+        "Enter the reason for rejecting this institution:"
+      );
+
+      if (reason === null) return;
+
+      rejectionReason = reason.trim();
+
+      if (!rejectionReason) {
+        window.alert("Please provide a rejection reason.");
+        return;
+      }
+
+      if (!window.confirm("Are you sure you want to reject this institution?")) {
+        return;
+      }
+    } else {
+      if (!window.confirm("Approve this institution registration?")) {
+        return;
+      }
+    }
+
+    try {
+      setActionId(institutionId);
+
+      const response = await fetch(
+        `${API}/admin/institutions/${institutionId}/${action}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body:
+            action === "reject"
+              ? JSON.stringify({ rejectionReason })
+              : JSON.stringify({}),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Action failed");
+      }
+
+      window.alert(data.message);
+      await fetchInstitutions();
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : "Something went wrong"
+      );
+    } finally {
+      setActionId("");
+    }
+  };
+
+  // Activate or deactivate institution
+  const handleToggleStatus = async (institution: Institution) => {
+    const token = localStorage.getItem("blockcert_token");
+
+    if (!token) {
+      router.replace("/admin/login");
+      return;
+    }
+
+    const newStatus = !institution.isActive;
+
+    const confirmed = window.confirm(
+      newStatus
+        ? `Activate ${institution.institutionName}?`
+        : `Deactivate ${institution.institutionName}?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setActionId(institution._id);
+
+      const response = await fetch(
+        `${API}/admin/institutions/${institution._id}/status`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ isActive: newStatus }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Status update failed");
+      }
+
+      window.alert(data.message);
+      await fetchInstitutions();
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : "Something went wrong"
+      );
+    } finally {
+      setActionId("");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("blockcert_token");
+    localStorage.removeItem("blockcert_user");
+    router.replace("/admin/login");
+  };
+
+  // Statistics
+  const pendingCount = institutions.filter(
+    (item) => !item.isApproved && item.isActive
+  ).length;
+
+  const approvedCount = institutions.filter(
+    (item) => item.isApproved && item.isActive
+  ).length;
+
+  const rejectedCount = institutions.filter(
+    (item) => !item.isApproved && !item.isActive
+  ).length;
+
+  const inactiveCount = institutions.filter(
+    (item) => item.isApproved && !item.isActive
+  ).length;
+
+  // Search and filter
+  const filteredInstitutions = useMemo(() => {
+    return institutions.filter((item) => {
+      const query = search.trim().toLowerCase();
+
+      const matchesSearch =
+        item.institutionName.toLowerCase().includes(query) ||
+        item.email.toLowerCase().includes(query) ||
+        item.institutionCode.toLowerCase().includes(query);
+
+      let matchesFilter = true;
+
+      switch (filter) {
+        case "pending":
+          matchesFilter = !item.isApproved && item.isActive;
+          break;
+        case "approved":
+          matchesFilter = item.isApproved && item.isActive;
+          break;
+        case "rejected":
+          matchesFilter = !item.isApproved && !item.isActive;
+          break;
+        case "inactive":
+          matchesFilter = item.isApproved && !item.isActive;
+          break;
+        default:
+          matchesFilter = true;
+      }
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [institutions, search, filter]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        <RefreshCw className="mr-3 animate-spin" />
+        Loading Admin Dashboard...
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+
+      {/* Sidebar */}
+      <aside className="fixed left-0 top-0 hidden h-screen w-64 border-r border-slate-800 bg-slate-900 p-6 md:block">
+        <div className="mb-12 flex items-center gap-3">
+          <ShieldCheck className="text-blue-400" size={32} />
+          <div>
+            <h1 className="text-xl font-bold">BlockCert</h1>
+            <p className="text-xs text-slate-400">Admin Portal</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <button
+            onClick={() => setActiveView("dashboard")}
+            className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm ${
+              activeView === "dashboard"
+                ? "bg-blue-600/15 text-blue-400"
+                : "text-slate-400 hover:bg-slate-800"
+            }`}
+          >
+            <LayoutDashboard size={19} />
+            Dashboard
+          </button>
+
+          <button
+            onClick={() => setActiveView("institutions")}
+            className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm ${
+              activeView === "institutions"
+                ? "bg-blue-600/15 text-blue-400"
+                : "text-slate-400 hover:bg-slate-800"
+            }`}
+          >
+            <Building2 size={19} />
+            Institutions
+          </button>
+        </div>
+
+        <button
+          onClick={handleLogout}
+          className="absolute bottom-8 left-6 flex items-center gap-3 text-sm text-red-400 hover:text-red-300"
+        >
+          <LogOut size={19} />
+          Logout
+        </button>
+      </aside>
+
+      {/* Main content */}
+      <main className="px-5 py-8 md:ml-64 md:px-10">
+
+        <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-slate-400">
+              System Administration
+            </p>
+
+            <h2 className="mt-1 text-3xl font-bold">
+              {activeView === "dashboard"
+                ? "Admin Dashboard"
+                : "Institution Management"}
+            </h2>
+
+            <p className="mt-2 text-sm text-slate-400">
+              Welcome, {adminName}
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setLoading(true);
+                fetchInstitutions();
+              }}
+              className="flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-3 text-sm hover:bg-slate-800"
+            >
+              <RefreshCw size={17} />
+              Refresh
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold hover:bg-red-500"
+            >
+              <LogOut size={17} />
+              Logout
+            </button>
+          </div>
+        </header>
+
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+
+        {/* Dashboard view */}
+        {activeView === "dashboard" && (
+          <>
+            <section className="mb-10 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                title="Total Institutions"
+                value={institutions.length}
+                icon={<Building2 size={23} />}
+              />
+
+              <StatCard
+                title="Pending Approvals"
+                value={pendingCount}
+                icon={<Clock size={23} />}
+              />
+
+              <StatCard
+                title="Approved / Active"
+                value={approvedCount}
+                icon={<CheckCircle size={23} />}
+              />
+
+              <StatCard
+                title="Rejected Institutions"
+                value={rejectedCount}
+                icon={<XCircle size={23} />}
+              />
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-7">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-bold">
+                    Institution Overview
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-400">
+                    Manage registrations and institution access.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setActiveView("institutions")}
+                  className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-500"
+                >
+                  Manage Institutions
+                </button>
+              </div>
+
+              <div className="mt-8 grid gap-4 sm:grid-cols-3">
+                <SummaryCard label="Pending" value={pendingCount} />
+                <SummaryCard label="Inactive" value={inactiveCount} />
+                <SummaryCard label="Approved" value={approvedCount} />
+              </div>
+
+              <div className="mt-7 border-t border-slate-800 pt-6">
+                <p className="text-sm text-slate-400">
+                  You currently manage {institutions.length} registered
+                  institutions in BlockCert.
+                </p>
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* Institution management view */}
+        {activeView === "institutions" && (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900">
+
+            <div className="border-b border-slate-800 p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-bold">
+                    Institution Management
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-400">
+                    Search, review and manage registered institutions.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setActiveView("dashboard")}
+                  className="flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm hover:bg-slate-800"
+                >
+                  <ArrowLeft size={16} />
+                  Dashboard
+                </button>
+              </div>
+
+              {/* Search */}
+              <div className="mt-6 flex items-center rounded-xl border border-slate-700 bg-slate-950 px-4">
+                <Search size={19} className="text-slate-500" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search institution name, email or code..."
+                  className="w-full bg-transparent px-3 py-4 text-sm text-white outline-none placeholder:text-slate-500"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    className="text-slate-400 hover:text-white"
+                    aria-label="Clear search"
+                  >
+                    <X size={17} />
+                  </button>
+                )}
+              </div>
+
+              {/* Filters */}
+              <div className="mt-5 flex flex-wrap gap-2">
+                {(
+                  [
+                    ["all", "All"],
+                    ["pending", "Pending"],
+                    ["approved", "Approved"],
+                    ["rejected", "Rejected"],
+                    ["inactive", "Inactive"],
+                  ] as [FilterType, string][]
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => setFilter(value)}
+                    className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                      filter === value
+                        ? "bg-blue-600 text-white"
+                        : "border border-slate-700 text-slate-400 hover:bg-slate-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <p className="mt-4 text-xs text-slate-500">
+                Showing {filteredInstitutions.length} of {institutions.length} institutions
+              </p>
+            </div>
+
+            {/* Institution table */}
+            {filteredInstitutions.length === 0 ? (
+              <div className="p-12 text-center">
+                <Users className="mx-auto mb-4 text-slate-500" size={40} />
+                <h4 className="font-semibold">
+                  No matching institutions
+                </h4>
+                <p className="mt-2 text-sm text-slate-400">
+                  Try changing your search or status filter.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1100px] text-left text-sm">
+                  <thead className="bg-slate-950/70 text-slate-400">
+                    <tr>
+                      <th className="px-6 py-4">Institution</th>
+                      <th className="px-6 py-4">Code</th>
+                      <th className="px-6 py-4">Email</th>
+                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4">Actions</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filteredInstitutions.map((institution) => {
+                      const pending =
+                        !institution.isApproved && institution.isActive;
+
+                      const approved = institution.isApproved;
+                      const busy = actionId === institution._id;
+
+                      return (
+                        <tr
+                          key={institution._id}
+                          className="border-t border-slate-800 hover:bg-slate-800/40"
+                        >
+                          <td className="px-6 py-5">
+                            <p className="font-semibold">
+                              {institution.institutionName}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {institution.phone}
+                            </p>
+                          </td>
+
+                          <td className="px-6 py-5 text-slate-300">
+                            {institution.institutionCode}
+                          </td>
+
+                          <td className="px-6 py-5 text-slate-300">
+                            {institution.email}
+                          </td>
+
+                          <td className="px-6 py-5">
+                            <StatusBadge institution={institution} />
+                          </td>
+
+                          <td className="px-6 py-5">
+                            <div className="flex flex-wrap gap-2">
+
+                              <button
+                                onClick={() => setSelectedInstitution(institution)}
+                                className="flex items-center gap-1 rounded-lg border border-blue-500/30 px-3 py-2 text-xs font-semibold text-blue-400 hover:bg-blue-500/10"
+                              >
+                                <Eye size={14} />
+                                Details
+                              </button>
+
+                              {pending ? (
+                                <>
+                                  <button
+                                    disabled={busy}
+                                    onClick={() =>
+                                      handleInstitutionAction(institution._id, "approve")
+                                    }
+                                    className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold hover:bg-green-500 disabled:opacity-50"
+                                  >
+                                    Approve
+                                  </button>
+
+                                  <button
+                                    disabled={busy}
+                                    onClick={() =>
+                                      handleInstitutionAction(institution._id, "reject")
+                                    }
+                                    className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold hover:bg-red-500 disabled:opacity-50"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : approved ? (
+                                <button
+                                  disabled={busy}
+                                  onClick={() => handleToggleStatus(institution)}
+                                  className={`flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50 ${
+                                    institution.isActive
+                                      ? "bg-orange-600 hover:bg-orange-500"
+                                      : "bg-green-600 hover:bg-green-500"
+                                  }`}
+                                >
+                                  <Power size={13} />
+                                  {busy
+                                    ? "Updating..."
+                                    : institution.isActive
+                                    ? "Deactivate"
+                                    : "Activate"}
+                                </button>
+                              ) : (
+                                <span className="px-2 py-2 text-xs text-slate-500">
+                                  No action
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
+        <footer className="mt-10 text-center text-xs text-slate-600">
+          BlockCert System Administration Portal Â© 2026
+        </footer>
+      </main>
+
+      {/* Institution details popup */}
+      {selectedInstitution && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setSelectedInstitution(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-6 flex items-start justify-between">
+              <div>
+                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                  <Building2 size={25} />
+                </div>
+                <h3 className="text-xl font-bold">
+                  Institution Details
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  Complete registration information
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedInstitution(null)}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
+                aria-label="Close details"
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            <div className="mb-5 rounded-xl bg-slate-950 p-4">
+              <h4 className="text-lg font-bold">
+                {selectedInstitution.institutionName}
+              </h4>
+              <p className="mt-1 text-sm text-slate-400">
+                Institution Code: {selectedInstitution.institutionCode}
+              </p>
+              <div className="mt-3">
+                <StatusBadge institution={selectedInstitution} />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <DetailRow
+                icon={<Mail size={18} />}
+                label="Email Address"
+                value={selectedInstitution.email}
+              />
+
+              <DetailRow
+                icon={<Phone size={18} />}
+                label="Phone Number"
+                value={selectedInstitution.phone}
+              />
+
+              <DetailRow
+                icon={<MapPin size={18} />}
+                label="Address"
+                value={selectedInstitution.address}
+              />
+
+              {selectedInstitution.website && (
+                <DetailRow
+                  icon={<Building2 size={18} />}
+                  label="Website"
+                  value={selectedInstitution.website}
+                />
+              )}
+
+              <DetailRow
+                icon={<Calendar size={18} />}
+                label="Registration Date"
+                value={new Date(selectedInstitution.createdAt).toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "long",
+                  year: "numeric",
+                })}
+              />
+            </div>
+
+            <button
+              onClick={() => setSelectedInstitution(null)}
+              className="mt-7 w-full rounded-xl bg-blue-600 py-3 font-semibold hover:bg-blue-500"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ institution }: { institution: Institution }) {
+  let label = "Rejected";
+  let style = "bg-red-500/10 text-red-400";
+
+  if (institution.isApproved && institution.isActive) {
+    label = "Approved / Active";
+    style = "bg-green-500/10 text-green-400";
+  } else if (institution.isApproved && !institution.isActive) {
+    label = "Deactivated";
+    style = "bg-orange-500/10 text-orange-400";
+  } else if (!institution.isApproved && institution.isActive) {
+    label = "Pending";
+    style = "bg-yellow-500/10 text-yellow-400";
+  }
+
+  return (
+    <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${style}`}>
+      {label}
+    </span>
+  );
+}
+
+function StatCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string;
+  value: number;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+      <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+        {icon}
+      </div>
+      <p className="text-sm text-slate-400">{title}</p>
+      <h3 className="mt-2 text-3xl font-bold">{value}</h3>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950 p-5">
+      <p className="text-sm text-slate-400">{label}</p>
+      <p className="mt-2 text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
+
+function DetailRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex gap-3">
+      <div className="mt-1 text-blue-400">{icon}</div>
+      <div className="min-w-0">
+        <p className="text-xs text-slate-500">{label}</p>
+        <p className="break-words text-sm text-slate-200">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\admin\login\page.tsx ==========
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ShieldCheck, Lock, Mail, Eye, EyeOff, ArrowLeft } from "lucide-react";
+
+export default function AdminLoginPage() {
+  const router = useRouter();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError("");
+
+    if (!email || !password) {
+      setError("Please enter your email and password.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const response = await fetch(
+        "http://localhost:5000/api/auth/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email.trim().toLowerCase(),
+            password,
+            role: "admin",
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Admin login failed.");
+      }
+
+      if (data.user?.role !== "admin") {
+        throw new Error("You are not authorized to access the Admin portal.");
+      }
+
+      localStorage.setItem("blockcert_token", data.token);
+      localStorage.setItem("blockcert_user", JSON.stringify(data.user));
+
+      router.push("/admin/dashboard");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-slate-950 flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md">
+
+        <Link
+          href="/"
+          className="mb-8 inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition"
+        >
+          <ArrowLeft size={16} />
+          Back to Home
+        </Link>
+
+        <div className="rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-2xl">
+
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600/15 text-blue-400">
+              <ShieldCheck size={36} />
+            </div>
+
+            <h1 className="text-3xl font-bold text-white">
+              BlockCert
+            </h1>
+
+            <p className="mt-2 text-sm text-slate-400">
+              System Administration Portal
+            </p>
+
+            <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-xs font-semibold text-blue-300">
+              <Lock size={13} />
+              SECURE ADMIN ACCESS
+            </div>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-5">
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-300">
+                Admin Email
+              </label>
+
+              <div className="flex items-center rounded-xl border border-slate-700 bg-slate-950 px-4 focus-within:border-blue-500">
+                <Mail size={18} className="text-slate-500" />
+
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter admin email"
+                  className="w-full bg-transparent px-3 py-3.5 text-sm text-white outline-none placeholder:text-slate-600"
+                  autoComplete="username"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-300">
+                Password
+              </label>
+
+              <div className="flex items-center rounded-xl border border-slate-700 bg-slate-950 px-4 focus-within:border-blue-500">
+                <Lock size={18} className="text-slate-500" />
+
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter admin password"
+                  className="w-full bg-transparent px-3 py-3.5 text-sm text-white outline-none placeholder:text-slate-600"
+                  autoComplete="current-password"
+                  required
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="text-slate-500 hover:text-white"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl bg-blue-600 py-3.5 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? "Signing in..." : "Sign In to Admin Portal"}
+            </button>
+
+          </form>
+
+          <div className="mt-7 border-t border-slate-800 pt-6 text-center">
+            <p className="text-xs leading-6 text-slate-500">
+              Authorized System Administrators Only.
+              <br />
+              All login activities are protected.
+            </p>
+          </div>
+
+        </div>
+
+        <p className="mt-6 text-center text-xs text-slate-600">
+          Â© 2026 BlockCert. Secure Academic Certificate Verification.
+        </p>
+
+      </div>
+    </main>
+  );
+}
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\institution\dashboard\page.tsx ==========
+
+"use client";
+
+import { useEffect, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import {
+  LayoutDashboard,
+  FilePlus2,
+  Files,
+  ShieldCheck,
+  Users,
+  Link2,
+  UploadCloud,
+  Search,
+  GraduationCap,
+  CheckCircle2,
+  AlertCircle,
+  Hash,
+  FileCheck2,
+  ArrowRight,
+  Trash2,
+} from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+
+type Certificate = {
+  id: string;
+  studentId: string;
+  studentName: string;
+  registerNumber: string;
+  email: string;
+  department: string;
+  course: string;
+  issueDate: string;
+  hash: string;
+  fileName: string;
+  fileUrl: string;
+  status: "Issued" | "Revoked";
+};
+
+type ApiCertificate = {
+  _id: string;
+  certificateId: string;
+  student: {
+    _id: string;
+    studentName: string;
+    registerNumber: string;
+    email: string;
+    department: string;
+    course: string;
+  };
+  certificateTitle: string;
+  course: string;
+  department: string;
+  issueDate: string;
+  fileName: string;
+  fileUrl: string;
+  documentHash: string;
+  status: "Issued" | "Revoked";
+};
+
+type Student = {
+  _id: string;
+  studentName: string;
+  registerNumber: string;
+  email: string;
+  phone?: string;
+  department: string;
+  course: string;
+  batch?: string;
+  isActive: boolean;
+  createdAt?: string;
+};
+
+export default function Home() {
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [activePage, setActivePage] = useState("Dashboard");
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [certificatesLoading, setCertificatesLoading] = useState(false);
+  const [certificatesError, setCertificatesError] = useState("");
+
+  // Students are fetched from the authenticated backend API.
+  const [students, setStudents] = useState<Student[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsError, setStudentsError] = useState("");
+  const [studentSearch, setStudentSearch] = useState("");
+
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [studentName, setStudentName] = useState("");
+  const [registerNumber, setRegisterNumber] = useState("");
+  const [email, setEmail] = useState("");
+  const [department, setDepartment] = useState("");
+  const [course, setCourse] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  const [searchId, setSearchId] = useState("");
+  const [verifyFile, setVerifyFile] = useState<File | null>(null);
+  const [verification, setVerification] = useState("");
+  const [isIssuing, setIsIssuing] = useState(false);
+  const [revokingId, setRevokingId] = useState("");
+  const [issuedCertificate, setIssuedCertificate] =
+    useState<Certificate | null>(null);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const token = localStorage.getItem("blockcert_token");
+    const savedUser = localStorage.getItem("blockcert_user");
+
+    if (!token || !savedUser) {
+      router.replace("/institution/login");
+      return;
+    }
+
+    try {
+      const user = JSON.parse(savedUser);
+
+      if (user.role !== "institution") {
+        router.replace("/student/dashboard");
+        return;
+      }
+
+      setAuthChecked(true);
+      void fetchInstitutionCertificates();
+      void fetchInstitutionStudents();
+      setLoaded(true);
+    } catch {
+      localStorage.removeItem("blockcert_token");
+      localStorage.removeItem("blockcert_user");
+      router.replace("/institution/login");
+    }
+  }, [router]);
+
+  function mapApiCertificate(item: ApiCertificate): Certificate {
+    return {
+      id: item.certificateId,
+      studentId: item.student?._id || "",
+      studentName: item.student?.studentName || "Unknown student",
+      registerNumber: item.student?.registerNumber || "â€”",
+      email: item.student?.email || "",
+      department: item.department,
+      course: item.course,
+      issueDate: new Date(item.issueDate).toLocaleDateString("en-IN"),
+      hash: item.documentHash,
+      fileName: item.fileName,
+      fileUrl: item.fileUrl,
+      status: item.status,
+    };
+  }
+
+  async function fetchInstitutionCertificates() {
+    const token = localStorage.getItem("blockcert_token");
+
+    if (!token) {
+      setCertificatesError("Your login session was not found. Please sign in again.");
+      setCertificates([]);
+      return;
+    }
+
+    setCertificatesLoading(true);
+    setCertificatesError("");
+
+    try {
+      const response = await fetch("http://localhost:5000/api/certificates/institution", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to fetch certificates.");
+      const records: ApiCertificate[] = Array.isArray(data.certificates) ? data.certificates : [];
+      setCertificates(records.map(mapApiCertificate));
+    } catch (error) {
+      setCertificatesError(error instanceof Error ? error.message : "Unable to load certificates.");
+    } finally {
+      setCertificatesLoading(false);
+    }
+  }
+
+  async function fetchInstitutionStudents() {
+    const token = localStorage.getItem("blockcert_token");
+
+    if (!token) {
+      setStudentsError("Your login session was not found. Please sign in again.");
+      setStudents([]);
+      return;
+    }
+
+    setStudentsLoading(true);
+    setStudentsError("");
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/students/institution",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to fetch students.");
+      }
+
+      setStudents(Array.isArray(data.students) ? data.students : []);
+    } catch (error) {
+      setStudentsError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load students from the server."
+      );
+      setStudents([]);
+    } finally {
+      setStudentsLoading(false);
+    }
+  }
+
+  const filteredStudents = students.filter((student) => {
+    const search = studentSearch.trim().toLowerCase();
+
+    if (!search) return true;
+
+    return [
+      student.studentName,
+      student.registerNumber,
+      student.email,
+      student.department,
+      student.course,
+      student.batch || "",
+    ].some((value) => value.toLowerCase().includes(search));
+  });
+
+  async function generateHash(file: File) {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+
+    return Array.from(new Uint8Array(hashBuffer))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async function handleIssue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    setIssuedCertificate(null);
+
+    if (!selectedStudentId) {
+      setMessage("Please select a registered student.");
+      return;
+    }
+    if (!selectedFile) {
+      setMessage("Please upload a PDF certificate.");
+      return;
+    }
+    if (selectedFile.type !== "application/pdf" || !selectedFile.name.toLowerCase().endsWith(".pdf")) {
+      setMessage("Only PDF files are accepted.");
+      return;
+    }
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      setMessage("Please upload a PDF smaller than 5 MB.");
+      return;
+    }
+
+    const token = localStorage.getItem("blockcert_token");
+    if (!token) {
+      setMessage("Your login session was not found. Please sign in again.");
+      return;
+    }
+
+    setIsIssuing(true);
+    try {
+      const formData = new FormData();
+      formData.append("studentId", selectedStudentId);
+      formData.append("certificateTitle", `${course} Certificate`);
+      formData.append("course", course);
+      formData.append("department", department);
+      formData.append("certificate", selectedFile);
+
+      const response = await fetch("http://localhost:5000/api/certificates/issue", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to issue certificate.");
+
+      const apiCertificate = data.certificate as ApiCertificate;
+      const certificate: Certificate = {
+        id: apiCertificate.certificateId,
+        studentId: selectedStudentId,
+        studentName,
+        registerNumber,
+        email,
+        department,
+        course,
+        issueDate: new Date(apiCertificate.issueDate).toLocaleDateString("en-IN"),
+        hash: apiCertificate.documentHash,
+        fileName: apiCertificate.fileName,
+        fileUrl: apiCertificate.fileUrl,
+        status: apiCertificate.status,
+      };
+
+      setIssuedCertificate(certificate);
+      setSelectedStudentId("");
+      setStudentName("");
+      setRegisterNumber("");
+      setEmail("");
+      setDepartment("");
+      setCourse("");
+      setSelectedFile(null);
+      const fileInput = document.getElementById("certificateFile") as HTMLInputElement | null;
+      if (fileInput) fileInput.value = "";
+      setMessage("Certificate issued and saved in MongoDB successfully!");
+      await fetchInstitutionCertificates();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to issue certificate.");
+    } finally {
+      setIsIssuing(false);
+    }
+  }
+
+  async function handleVerify(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setVerification("");
+
+    const certificate = certificates.find(
+      (item) => item.id.toLowerCase() === searchId.trim().toLowerCase()
+    );
+
+    if (!certificate) {
+      setVerification("NOT_FOUND");
+      return;
+    }
+    if (certificate.status === "Revoked") {
+      setVerification("REVOKED");
+      return;
+    }
+    if (verifyFile) {
+      if (verifyFile.type !== "application/pdf") {
+        setVerification("INVALID_FILE");
+        return;
+      }
+      try {
+        const uploadedHash = await generateHash(verifyFile);
+        if (uploadedHash !== certificate.hash) {
+          setVerification("TAMPERED");
+          return;
+        }
+      } catch {
+        setVerification("ERROR");
+        return;
+      }
+    }
+    setVerification("AUTHENTIC");
+  }
+
+  async function revokeCertificate(certificateId: string) {
+    const enteredReason = window.prompt(
+      "Enter the reason for revoking this certificate:"
+    );
+
+    if (enteredReason === null) return;
+
+    const revocationReason = enteredReason.trim();
+    if (!revocationReason) {
+      window.alert("Please enter a reason before revoking the certificate.");
+      return;
+    }
+
+    if (!window.confirm(
+      `Are you sure you want to revoke certificate ${certificateId}? This action cannot be undone.`
+    )) return;
+
+    const token = localStorage.getItem("blockcert_token");
+    if (!token) {
+      window.alert("Your login session was not found. Please sign in again.");
+      router.replace("/institution/login");
+      return;
+    }
+
+    setRevokingId(certificateId);
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/certificates/revoke",
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ certificateId, revocationReason }),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to revoke certificate.");
+      }
+
+      await fetchInstitutionCertificates();
+      window.alert("Certificate revoked successfully.");
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : "Unable to revoke certificate."
+      );
+    } finally {
+      setRevokingId("");
+    }
+  }
+
+  const total = certificates.length;
+  const issued = certificates.filter(
+    (item) => item.status === "Issued"
+  ).length;
+  const revoked = certificates.filter(
+    (item) => item.status === "Revoked"
+  ).length;
+
+  const menu = [
+    { name: "Dashboard", icon: LayoutDashboard },
+    { name: "Issue Certificate", icon: FilePlus2 },
+    { name: "All Certificates", icon: Files },
+    { name: "Verify Certificate", icon: ShieldCheck },
+    { name: "Students", icon: Users },
+    { name: "Blockchain Records", icon: Link2 },
+  ];
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <p className="text-lg font-semibold text-blue-700">
+          Checking institution access...
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800">
+      <div className="flex min-h-screen">
+
+        {/* SIDEBAR */}
+        <aside className="flex w-64 shrink-0 flex-col bg-slate-950 p-5 text-white">
+          <div className="mb-10">
+            <h1 className="text-2xl font-bold">
+              BlockCert<span className="text-blue-400">.</span>
+            </h1>
+            <p className="mt-1 text-xs text-slate-400">
+              Blockchain Certificate System
+            </p>
+          </div>
+
+          <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-500">
+            Main Menu
+          </p>
+
+          <nav className="flex flex-col gap-2">
+            {menu.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <button
+                  key={item.name}
+                  onClick={() => {
+                    setActivePage(item.name);
+                    setMessage("");
+                    setVerification("");
+                    setIssuedCertificate(null);
+
+                    if (item.name === "Students" || item.name === "Issue Certificate") {
+                      if (item.name === "Students") setStudentSearch("");
+                      void fetchInstitutionStudents();
+                    }
+                    if (item.name === "All Certificates" || item.name === "Dashboard" || item.name === "Blockchain Records") {
+                      void fetchInstitutionCertificates();
+                    }
+                  }}
+                  className={`flex items-center gap-3 rounded-lg px-4 py-3 text-left text-sm transition ${
+                    activePage === item.name
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  <Icon size={18} />
+                  {item.name}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="mt-auto rounded-xl bg-slate-900 p-4">
+            <p className="text-sm font-semibold">Blockchain Network</p>
+            <p className="mt-2 text-xs text-green-400">
+              â— Local development mode
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              Blockchain connection pending
+            </p>
+          </div>
+        </aside>
+
+        {/* MAIN CONTENT */}
+        <main className="min-w-0 flex-1 p-5 md:p-8">
+
+          {/* HEADER */}
+          <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-slate-500">
+                Institution Administration
+              </p>
+              <h2 className="mt-1 text-2xl font-bold">
+                {activePage}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Manage and verify academic certificates securely.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-4">
+  <div className="rounded-xl border bg-white px-5 py-3 shadow-sm">
+    <p className="font-semibold">Administrator</p>
+    <p className="text-xs text-slate-500">Institution Admin</p>
+  </div>
+
+  <button
+    onClick={() => {
+      localStorage.removeItem("blockcert_token");
+      localStorage.removeItem("blockcert_user");
+      router.replace("/institution/login");
+    }}
+    className="rounded-lg bg-red-600 px-5 py-3 text-sm font-semibold text-white hover:bg-red-700"
+  >
+    Logout
+  </button>
+</div>
+          </header>
+
+          {/* DASHBOARD */}
+          {activePage === "Dashboard" && (
+            <>
+              <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  {
+                    title: "Total Certificates",
+                    value: total,
+                    icon: Files,
+                  },
+                  {
+                    title: "Active Certificates",
+                    value: issued,
+                    icon: ShieldCheck,
+                  },
+                  {
+                    title: "Registered Students",
+                    value: students.length,
+                    icon: GraduationCap,
+                  },
+                  {
+                    title: "Revoked Certificates",
+                    value: revoked,
+                    icon: AlertCircle,
+                  },
+                ].map((stat) => {
+                  const Icon = stat.icon;
+
+                  return (
+                    <div
+                      key={stat.title}
+                      className="rounded-xl border bg-white p-5 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-slate-500">
+                          {stat.title}
+                        </p>
+                        <Icon className="text-blue-600" size={23} />
+                      </div>
+                      <h3 className="mt-4 text-3xl font-bold">
+                        {loaded ? stat.value : "..."}
+                      </h3>
+                      <p className="mt-2 text-xs text-slate-400">
+                        Live application data
+                      </p>
+                    </div>
+                  );
+                })}
+              </section>
+
+              <section className="mt-8 rounded-xl bg-blue-700 p-7 text-white">
+                <h3 className="text-xl font-bold">
+                  Secure Certificate Management
+                </h3>
+                <p className="mt-2 max-w-xl text-sm text-blue-100">
+                  Issue academic certificates, generate unique QR codes
+                  and check certificate authenticity.
+                </p>
+                <button
+                  onClick={() => setActivePage("Issue Certificate")}
+                  className="mt-5 rounded-lg bg-white px-5 py-3 text-sm font-semibold text-blue-700"
+                >
+                  + Issue New Certificate
+                </button>
+              </section>
+
+              <section className="mt-8 rounded-xl border bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold">
+                  Recent Certificates
+                </h3>
+                <p className="mb-5 text-sm text-slate-500">
+                  Recently issued academic certificates
+                </p>
+
+                <CertificateTable
+                  certificates={certificates.slice(0, 5)}
+                  onRevoke={revokeCertificate}
+                  revokingId={revokingId}
+                />
+
+                {certificates.length === 0 && (
+                  <p className="py-8 text-center text-sm text-slate-400">
+                    No certificates found in MongoDB. Start by issuing your first certificate.
+                  </p>
+                )}
+              </section>
+            </>
+          )}
+
+          {/* ISSUE CERTIFICATE */}
+          {activePage === "Issue Certificate" && (
+            <section className="mx-auto max-w-4xl rounded-xl border bg-white p-6 shadow-sm md:p-8">
+              <div className="mb-7">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-blue-100 p-3 text-blue-700">
+                    <FilePlus2 size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold">
+                      Issue New Certificate
+                    </h3>
+                    <p className="text-sm text-slate-500">
+                      Enter student details and upload the certificate PDF.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleIssue} className="space-y-6">
+
+                <div>
+                  <h4 className="mb-4 font-semibold">
+                    Student Information
+                  </h4>
+
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <div className="md:col-span-2">
+                      <FormField label="Select Registered Student">
+                        <select
+                          required
+                          value={selectedStudentId}
+                          onChange={(e) => {
+                            const selected = students.find((item) => item._id === e.target.value);
+                            setSelectedStudentId(e.target.value);
+                            setStudentName(selected?.studentName || "");
+                            setRegisterNumber(selected?.registerNumber || "");
+                            setEmail(selected?.email || "");
+                            setDepartment(selected?.department || "");
+                            setCourse(selected?.course || "");
+                          }}
+                          className="form-input"
+                        >
+                          <option value="">Choose a student</option>
+                          {students.filter((item) => item.isActive).map((item) => (
+                            <option key={item._id} value={item._id}>
+                              {item.studentName} â€” {item.registerNumber}
+                            </option>
+                          ))}
+                        </select>
+                        {studentsLoading && <p className="mt-2 text-xs text-slate-500">Loading registered students...</p>}
+                        {studentsError && <p className="mt-2 text-xs text-red-600">{studentsError}</p>}
+                        {!studentsLoading && students.length === 0 && !studentsError && (
+                          <p className="mt-2 text-xs text-amber-600">No registered students found. Register a student first.</p>
+                        )}
+                      </FormField>
+                    </div>
+
+                    <FormField label="Student Full Name">
+                      <input readOnly value={studentName} placeholder="Selected student name" className="form-input bg-slate-50" />
+                    </FormField>
+                    <FormField label="Register Number">
+                      <input readOnly value={registerNumber} placeholder="Register number" className="form-input bg-slate-50" />
+                    </FormField>
+                    <FormField label="Email Address">
+                      <input readOnly value={email} placeholder="Student email" className="form-input bg-slate-50" />
+                    </FormField>
+                    <FormField label="Department">
+                      <input readOnly value={department} placeholder="Department" className="form-input bg-slate-50" />
+                    </FormField>
+                    <div className="md:col-span-2">
+                      <FormField label="Course / Degree">
+                        <input readOnly value={course} placeholder="Course" className="form-input bg-slate-50" />
+                      </FormField>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-6">
+                  <h4 className="mb-4 font-semibold">
+                    Upload Certificate
+                  </h4>
+
+                  <label
+                    htmlFor="certificateFile"
+                    className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-10 text-center hover:border-blue-500"
+                  >
+                    <UploadCloud size={38} className="text-blue-600" />
+                    <p className="mt-3 font-semibold">
+                      Click to upload certificate PDF
+                    </p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      PDF format only Â· Maximum size 5 MB
+                    </p>
+                    <input
+                      id="certificateFile"
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      className="hidden"
+                      onChange={(e) =>
+                        setSelectedFile(e.target.files?.[0] || null)
+                      }
+                    />
+                  </label>
+
+                  {selectedFile && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
+                      <FileCheck2 size={19} />
+                      {selectedFile.name}
+                    </div>
+                  )}
+                </div>
+
+                {message && (
+                  <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
+                    {message}
+                  </p>
+                )}
+
+                <button
+                  disabled={isIssuing}
+                  type="submit"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isIssuing ? "Uploading and Issuing..." : "Issue Certificate"}
+                  <ArrowRight size={18} />
+                </button>
+              </form>
+
+              {issuedCertificate && (
+                <div className="mt-8 rounded-xl border border-green-200 bg-green-50 p-6">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <CheckCircle2 size={23} />
+                    <h3 className="font-bold">
+                      Certificate Issued Successfully!
+                    </h3>
+                  </div>
+
+                  <div className="mt-5 grid gap-5 md:grid-cols-2">
+                    <div className="space-y-3 text-sm">
+                      <p>
+                        <strong>Certificate ID:</strong>
+                        <br />
+                        {issuedCertificate.id}
+                      </p>
+                      <p>
+                        <strong>Student:</strong>
+                        <br />
+                        {issuedCertificate.studentName}
+                      </p>
+                      <p>
+                        <strong>SHA-256 Hash:</strong>
+                        <br />
+                        <span className="break-all text-xs">
+                          {issuedCertificate.hash}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4">
+                      <QRCodeSVG
+                        value={issuedCertificate.id}
+                        size={150}
+                        level="H"
+                      />
+                      <p className="mt-3 text-xs font-semibold">
+                        Certificate QR Code
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {issuedCertificate.id}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-xs text-green-700">
+                    This certificate is saved in MongoDB. Blockchain transaction recording is still pending.
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* ALL CERTIFICATES */}
+          {activePage === "All Certificates" && (
+            <section className="rounded-xl border bg-white p-6 shadow-sm">
+              <h3 className="mb-2 text-lg font-bold">
+                All Certificates
+              </h3>
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-slate-500">Manage all certificates saved in MongoDB.</p>
+                <button type="button" onClick={() => void fetchInstitutionCertificates()} disabled={certificatesLoading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                  {certificatesLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+              {certificatesError && <p className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{certificatesError}</p>}
+
+              <CertificateTable
+                certificates={certificates}
+                onRevoke={revokeCertificate}
+                revokingId={revokingId}
+              />
+
+              {certificates.length === 0 && (
+                <p className="py-10 text-center text-slate-400">
+                  No certificates available.
+                </p>
+              )}
+            </section>
+          )}
+
+          {/* VERIFY CERTIFICATE */}
+          {activePage === "Verify Certificate" && (
+            <section className="mx-auto max-w-3xl rounded-xl border bg-white p-6 shadow-sm md:p-8">
+              <div className="mb-7 text-center">
+                <ShieldCheck
+                  size={48}
+                  className="mx-auto text-blue-600"
+                />
+                <h3 className="mt-3 text-xl font-bold">
+                  Verify Academic Certificate
+                </h3>
+                <p className="mt-2 text-sm text-slate-500">
+                  Enter a Certificate ID and optionally upload its PDF.
+                </p>
+              </div>
+
+              <form onSubmit={handleVerify} className="space-y-5">
+                <FormField label="Certificate ID">
+                  <input
+                    required
+                    value={searchId}
+                    onChange={(e) => setSearchId(e.target.value)}
+                    placeholder="Example: BC-123456789"
+                    className="form-input"
+                  />
+                </FormField>
+
+                <FormField label="Upload certificate PDF (optional)">
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={(e) =>
+                      setVerifyFile(e.target.files?.[0] || null)
+                    }
+                    className="block w-full rounded-lg border p-3 text-sm"
+                  />
+                </FormField>
+
+                <button
+                  type="submit"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+                >
+                  <Search size={18} />
+                  Verify Certificate
+                </button>
+              </form>
+
+              {verification && (
+                <div className="mt-6 rounded-xl border p-5">
+                  {verification === "AUTHENTIC" && (
+                    <div className="text-green-700">
+                      <CheckCircle2 size={30} />
+                      <h3 className="mt-2 text-lg font-bold">
+                        Certificate Authentic
+                      </h3>
+                      <p className="mt-1 text-sm">
+                        The certificate exists and its hash matches
+                        the issued record.
+                      </p>
+                    </div>
+                  )}
+
+                  {verification === "TAMPERED" && (
+                    <div className="text-red-700">
+                      <AlertCircle size={30} />
+                      <h3 className="mt-2 text-lg font-bold">
+                        Tampering Detected!
+                      </h3>
+                      <p className="mt-1 text-sm">
+                        The uploaded PDF does not match the original
+                        certificate hash.
+                      </p>
+                    </div>
+                  )}
+
+                  {verification === "NOT_FOUND" && (
+                    <div className="text-red-700">
+                      <AlertCircle size={30} />
+                      <h3 className="font-bold">Certificate Not Found</h3>
+                      <p className="text-sm">
+                        No matching Certificate ID exists in the institution records.
+                      </p>
+                    </div>
+                  )}
+
+                  {verification === "REVOKED" && (
+                    <div className="text-red-700">
+                      <AlertCircle size={30} />
+                      <h3 className="font-bold">Certificate Revoked</h3>
+                    </div>
+                  )}
+
+                  {verification === "INVALID_FILE" && (
+                    <p className="text-red-700">
+                      Please upload a valid PDF file.
+                    </p>
+                  )}
+
+                  {verification === "ERROR" && (
+                    <p className="text-red-700">
+                      Unable to verify the uploaded file.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* STUDENTS */}
+          {activePage === "Students" && (
+            <section className="rounded-xl border bg-white p-6 shadow-sm">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold">Registered Students</h3>
+                  <p className="text-sm text-slate-500">
+                    Students registered with your institution in MongoDB.
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
+                  Total Students: {students.length}
+                </div>
+              </div>
+
+              <div className="mb-5 flex flex-wrap items-center gap-3">
+                <div className="relative min-w-[240px] flex-1">
+                  <Search
+                    size={18}
+                    className="absolute left-3 top-3 text-slate-400"
+                  />
+                  <input
+                    type="search"
+                    value={studentSearch}
+                    onChange={(event) => setStudentSearch(event.target.value)}
+                    placeholder="Search by name, register number, email or course"
+                    className="form-input pl-10"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void fetchInstitutionStudents()}
+                  disabled={studentsLoading}
+                  className="rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {studentsLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+
+              {studentsError && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {studentsError}
+                </div>
+              )}
+
+              {studentsLoading ? (
+                <p className="py-10 text-center text-sm text-slate-500">
+                  Loading students from MongoDB...
+                </p>
+              ) : studentsError ? (
+                <p className="py-6 text-center text-sm text-slate-500">
+                  Check your institution login and backend server, then select Refresh.
+                </p>
+              ) : filteredStudents.length === 0 ? (
+                <p className="py-10 text-center text-sm text-slate-400">
+                  {students.length === 0
+                    ? "No students are registered with this institution yet."
+                    : "No students match your search."}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[900px] text-left text-sm">
+                    <thead className="border-b bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="p-3">Student Name</th>
+                        <th className="p-3">Register Number</th>
+                        <th className="p-3">Email</th>
+                        <th className="p-3">Department</th>
+                        <th className="p-3">Course</th>
+                        <th className="p-3">Batch</th>
+                        <th className="p-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredStudents.map((student) => (
+                        <tr key={student._id} className="border-b last:border-0">
+                          <td className="p-3 font-medium text-slate-800">
+                            {student.studentName}
+                          </td>
+                          <td className="p-3">{student.registerNumber}</td>
+                          <td className="p-3">{student.email}</td>
+                          <td className="p-3">{student.department}</td>
+                          <td className="p-3">{student.course}</td>
+                          <td className="p-3">{student.batch || "â€”"}</td>
+                          <td className="p-3">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                student.isActive
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-red-100 text-red-700"
+                              }`}
+                            >
+                              {student.isActive ? "Active" : "Inactive"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* BLOCKCHAIN RECORDS */}
+          {activePage === "Blockchain Records" && (
+            <section className="rounded-xl border bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-3">
+                <Link2 className="text-blue-600" size={26} />
+                <div>
+                  <h3 className="text-lg font-bold">Blockchain Records</h3>
+                  <p className="text-sm text-slate-500">
+                    Certificate hashes stored in MongoDB. On-chain transactions are not connected yet.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                {certificates.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border p-4"
+                  >
+                    <p className="font-semibold">{item.id}</p>
+                    <p className="mt-2 break-all text-xs text-slate-500">
+                      <Hash size={13} className="mr-1 inline" />
+                      {item.hash}
+                    </p>
+                    <p className="mt-2 text-xs text-orange-600">
+                      Blockchain transaction: Not yet deployed
+                    </p>
+                  </div>
+                ))}
+
+                {certificates.length === 0 && (
+                  <p className="py-8 text-center text-slate-400">
+                    No certificate records available.
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
+          <footer className="mt-10 text-center text-xs text-slate-400">
+            BlockCert Â© 2026 | Blockchain-Based Certificate Verification
+          </footer>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function FormField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-semibold text-slate-700">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function CertificateTable({
+  certificates,
+  onRevoke,
+  revokingId,
+}: {
+  certificates: Certificate[];
+  onRevoke: (id: string) => void | Promise<void>;
+  revokingId: string;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[700px] text-left text-sm">
+        <thead>
+          <tr className="border-b text-slate-500">
+            <th className="p-3">Certificate ID</th>
+            <th className="p-3">Student</th>
+            <th className="p-3">Course</th>
+            <th className="p-3">Issue Date</th>
+            <th className="p-3">Status</th>
+            <th className="p-3">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {certificates.map((item) => (
+            <tr key={item.id} className="border-b last:border-0">
+              <td className="p-3 font-medium">{item.id}</td>
+              <td className="p-3">{item.studentName}</td>
+              <td className="p-3">{item.course}</td>
+              <td className="p-3">{item.issueDate}</td>
+              <td className="p-3">
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    item.status === "Issued"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {item.status}
+                </span>
+              </td>
+              <td className="p-3">
+                {item.status === "Issued" && (
+                  <button
+                    onClick={() => void onRevoke(item.id)}
+                    disabled={revokingId === item.id}
+                    title="Revoke certificate"
+                    className="text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {revokingId === item.id ? (
+                      <span className="text-xs font-semibold">...</span>
+                    ) : (
+                      <Trash2 size={17} />
+                    )}
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\institution\login\page.tsx ==========
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  ShieldCheck,
+  Building2,
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+
+export default function InstitutionLogin() {
+  const router = useRouter();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/auth/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email.trim().toLowerCase(),
+            password,
+            role: "institution",
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Login failed");
+      }
+
+      localStorage.setItem("blockcert_token", data.token);
+      localStorage.setItem("blockcert_user", JSON.stringify(data.user));
+
+      router.replace("/institution/dashboard");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to connect to server."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-slate-950 flex items-center justify-center p-5">
+      <div className="w-full max-w-5xl grid md:grid-cols-2 bg-white rounded-2xl overflow-hidden shadow-2xl">
+
+        <div className="bg-blue-950 text-white p-10 md:p-14 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-12">
+              <div className="bg-blue-500 p-3 rounded-xl">
+                <ShieldCheck size={30} />
+              </div>
+              <span className="text-2xl font-bold">BlockCert</span>
+            </div>
+
+            <h1 className="text-4xl font-bold leading-tight mb-5">
+              Secure Academic Certificate Verification
+            </h1>
+
+            <p className="text-blue-100 leading-7">
+              Manage academic certificates, issue verified credentials
+              and maintain trustworthy digital records using blockchain
+              technology.
+            </p>
+          </div>
+
+          <div className="mt-12 text-sm text-blue-200">
+            Â© 2026 BlockCert. All rights reserved.
+          </div>
+        </div>
+
+        <div className="p-8 md:p-14 flex flex-col justify-center">
+          <div className="mb-8">
+            <div className="w-14 h-14 bg-blue-100 text-blue-700 rounded-xl flex items-center justify-center mb-5">
+              <Building2 size={28} />
+            </div>
+
+            <h2 className="text-3xl font-bold text-slate-900">
+              Institution Login
+            </h2>
+
+            <p className="text-slate-500 mt-2">
+              Sign in to your institution account.
+            </p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Official Email
+              </label>
+
+              <div className="relative">
+                <Mail className="absolute left-3 top-3.5 text-slate-400" size={19} />
+
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter institution email"
+                  className="w-full border border-slate-300 rounded-lg py-3 pl-11 pr-4 text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Password
+              </label>
+
+              <div className="relative">
+                <Lock className="absolute left-3 top-3.5 text-slate-400" size={19} />
+
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="w-full border border-slate-300 rounded-lg py-3 pl-11 pr-12 text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3.5 text-slate-400"
+                >
+                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white font-semibold py-3 rounded-lg transition"
+            >
+              {loading ? "Signing in..." : "Sign In"}
+            </button>
+          </form>
+
+          <div className="mt-7 text-center text-sm text-slate-500">
+            Don't have an institution account?
+            <Link
+              href="/institution/register"
+              className="block mt-2 text-blue-700 font-semibold hover:underline"
+            >
+              Register Your Institution â†’
+            </Link>
+          </div>
+
+          <Link
+            href="/"
+            className="text-center text-blue-700 hover:underline mt-6 text-sm"
+          >
+            â† Back to Home
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\institution\register\page.tsx ==========
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  ShieldCheck,
+  Building2,
+  User,
+  Mail,
+  Lock,
+  Phone,
+  MapPin,
+  Hash,
+  Eye,
+  EyeOff,
+  CheckCircle,
+} from "lucide-react";
+
+export default function InstitutionRegister() {
+  const router = useRouter();
+
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    institutionName: "",
+    institutionCode: "",
+    phone: "",
+    address: "",
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    setForm({
+      ...form,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleRegister = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (form.password.length < 6) {
+      setError("Password must contain at least 6 characters.");
+      return;
+    }
+
+    if (form.password !== form.confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/auth/register/institution",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            email: form.email.trim().toLowerCase(),
+            password: form.password,
+            institutionName: form.institutionName.trim(),
+            institutionCode: form.institutionCode.trim().toUpperCase(),
+            phone: form.phone.trim(),
+            address: form.address.trim(),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Institution registration failed."
+        );
+      }
+
+      setSuccess(
+        "Institution registered successfully! Your account is pending administrator approval."
+      );
+
+      setForm({
+        name: "",
+        email: "",
+        password: "",
+        confirmPassword: "",
+        institutionName: "",
+        institutionCode: "",
+        phone: "",
+        address: "",
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputClass =
+    "w-full border border-slate-300 rounded-lg py-3 pl-11 pr-4 text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100";
+
+  return (
+    <main className="min-h-screen bg-slate-950 flex items-center justify-center p-5">
+      <div className="w-full max-w-6xl grid md:grid-cols-2 bg-white rounded-2xl overflow-hidden shadow-2xl">
+
+        {/* Left panel */}
+        <div className="bg-blue-950 text-white p-10 md:p-14 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-12">
+              <div className="bg-blue-500 p-3 rounded-xl">
+                <ShieldCheck size={30} />
+              </div>
+              <span className="text-2xl font-bold">
+                BlockCert
+              </span>
+            </div>
+
+            <h1 className="text-4xl font-bold leading-tight mb-5">
+              Bring Your Academic Credentials Into the Digital Future.
+            </h1>
+
+            <p className="text-blue-100 leading-7">
+              Register your institution to issue, manage and
+              securely verify academic certificates through
+              the BlockCert platform.
+            </p>
+
+            <div className="mt-10 space-y-5">
+              <div className="flex items-center gap-3">
+                <CheckCircle className="text-green-400" />
+                <span className="text-blue-100">
+                  Secure certificate management
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <CheckCircle className="text-green-400" />
+                <span className="text-blue-100">
+                  Digital student records
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <CheckCircle className="text-green-400" />
+                <span className="text-blue-100">
+                  Certificate authenticity verification
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-12 text-sm text-blue-200">
+            Â© 2026 BlockCert. All rights reserved.
+          </p>
+        </div>
+
+        {/* Right panel */}
+        <div className="p-8 md:p-12">
+          <div className="mb-7">
+            <div className="w-14 h-14 bg-blue-100 text-blue-700 rounded-xl flex items-center justify-center mb-5">
+              <Building2 size={30} />
+            </div>
+
+            <h2 className="text-3xl font-bold text-slate-900">
+              Institution Registration
+            </h2>
+
+            <p className="text-slate-500 mt-2">
+              Register your institution with BlockCert.
+            </p>
+          </div>
+
+          <form onSubmit={handleRegister} className="space-y-4">
+
+            {/* Institution name */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Institution Name
+              </label>
+              <div className="relative">
+                <Building2 className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <input
+                  name="institutionName"
+                  value={form.institutionName}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter institution name"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Institution code */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Institution Code
+              </label>
+              <div className="relative">
+                <Hash className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <input
+                  name="institutionCode"
+                  value={form.institutionCode}
+                  onChange={handleChange}
+                  required
+                  placeholder="e.g. ABC001"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Contact person */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Contact Person Name
+              </label>
+              <div className="relative">
+                <User className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <input
+                  name="name"
+                  value={form.name}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter administrator name"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Email */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Official Email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <input
+                  type="email"
+                  name="email"
+                  value={form.email}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter official email"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Phone */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Phone Number
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <input
+                  type="tel"
+                  name="phone"
+                  value={form.phone}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter phone number"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Address */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Institution Address
+              </label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <textarea
+                  name="address"
+                  value={form.address}
+                  onChange={handleChange}
+                  required
+                  rows={3}
+                  placeholder="Enter complete institution address"
+                  className={`${inputClass} resize-none`}
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Password
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  value={form.password}
+                  onChange={handleChange}
+                  required
+                  minLength={6}
+                  placeholder="Create a password"
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3.5 text-slate-400"
+                >
+                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Confirm password */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3.5 text-slate-400" size={19} />
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  value={form.confirmPassword}
+                  onChange={handleChange}
+                  required
+                  placeholder="Confirm your password"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            {success && (
+              <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg text-sm">
+                {success}
+                <button
+                  type="button"
+                  onClick={() => router.push("/institution/login")}
+                  className="block mt-2 font-semibold underline"
+                >
+                  Go to Institution Login
+                </button>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white font-semibold py-3 rounded-lg transition"
+            >
+              {loading ? "Registering..." : "Register Institution"}
+            </button>
+          </form>
+
+          <p className="text-center text-sm text-slate-500 mt-6">
+            Already registered?{" "}
+            <Link
+              href="/institution/login"
+              className="text-blue-700 font-semibold hover:underline"
+            >
+              Sign In
+            </Link>
+          </p>
+
+          <Link
+            href="/"
+            className="block text-center text-blue-700 hover:underline mt-5 text-sm"
+          >
+            â† Back to Home
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\student\dashboard\page.tsx ==========
+
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ShieldCheck,
+  GraduationCap,
+  Award,
+  FileCheck,
+  LogOut,
+  User,
+  FileText,
+  RefreshCw,
+  ExternalLink,
+} from "lucide-react";
+
+interface StudentUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+interface Certificate {
+  _id: string;
+  certificateId: string;
+  certificateTitle: string;
+  course: string;
+  department: string;
+  issueDate: string;
+  expiryDate?: string | null;
+  fileUrl?: string;
+  status: string;
+  institution?: {
+    institutionName: string;
+    institutionCode: string;
+  };
+}
+
+export default function StudentDashboard() {
+  const router = useRouter();
+
+  const [user, setUser] = useState<StudentUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [certificateLoading, setCertificateLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadCertificates = async (token: string) => {
+    setCertificateLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/student/my-certificates",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Unable to load certificates."
+        );
+      }
+
+      setCertificates(data.certificates || []);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong while loading certificates."
+      );
+    } finally {
+      setCertificateLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem("blockcert_token");
+    const savedUser = localStorage.getItem("blockcert_user");
+
+    if (!token || !savedUser) {
+      router.replace("/student/login");
+      return;
+    }
+
+    try {
+      const parsedUser = JSON.parse(savedUser);
+
+      if (parsedUser.role !== "student") {
+        router.replace("/student/login");
+        return;
+      }
+
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setUser(parsedUser);
+
+      loadCertificates(token);
+    } catch {
+      localStorage.removeItem("blockcert_token");
+      localStorage.removeItem("blockcert_user");
+      router.replace("/student/login");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false);
+    } finally {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false);
+    }
+  }, [router]);
+
+  const handleLogout = () => {
+    localStorage.removeItem("blockcert_token");
+    localStorage.removeItem("blockcert_user");
+    router.replace("/student/login");
+  };
+
+  const handleRefresh = () => {
+    const token = localStorage.getItem("blockcert_token");
+
+    if (token) {
+      loadCertificates(token);
+    }
+  };
+
+  const getCertificateUrl = (fileUrl?: string) => {
+    if (!fileUrl) return "#";
+
+    if (fileUrl.startsWith("http")) {
+      return fileUrl;
+    }
+
+    return `http://localhost:5000${fileUrl}`;
+  };
+
+  const formatDate = (date: string) => {
+    if (!date) return "Not available";
+
+    return new Date(date).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <p className="text-slate-600">Loading dashboard...</p>
+      </div>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <header className="bg-white border-b border-slate-200 px-6 py-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-indigo-700 text-white p-2 rounded-lg">
+              <ShieldCheck size={27} />
+            </div>
+
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">
+                BlockCert
+              </h1>
+              <p className="text-xs text-slate-500">
+                Student Portal
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg"
+          >
+            <LogOut size={18} />
+            Logout
+          </button>
+        </div>
+      </header>
+
+      <section className="max-w-7xl mx-auto p-6 md:p-10">
+        {/* Welcome Section */}
+        <div className="bg-gradient-to-r from-indigo-950 to-blue-800 text-white rounded-2xl p-8 md:p-10">
+          <p className="text-indigo-200 mb-3">
+            Welcome to your student portal
+          </p>
+
+          <h2 className="text-3xl md:text-4xl font-bold mb-3">
+            Hello, {user.name}!
+          </h2>
+
+          <p className="text-indigo-100">
+            Access your academic achievements and manage
+            your digital certificates securely.
+          </p>
+        </div>
+
+        {/* Dashboard Cards */}
+        <div className="grid md:grid-cols-3 gap-5 mt-8">
+          <div className="bg-white p-6 rounded-xl border border-slate-200">
+            <div className="bg-indigo-100 text-indigo-700 p-3 rounded-lg w-fit mb-4">
+              <Award size={25} />
+            </div>
+
+            <h3 className="font-semibold text-slate-800">
+              My Certificates
+            </h3>
+
+            <p className="text-3xl font-bold text-indigo-700 mt-3">
+              {certificateLoading ? "..." : certificates.length}
+            </p>
+
+            <p className="text-sm text-slate-500 mt-2">
+              Certificates issued to you.
+            </p>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl border border-slate-200">
+            <div className="bg-green-100 text-green-700 p-3 rounded-lg w-fit mb-4">
+              <FileCheck size={25} />
+            </div>
+
+            <h3 className="font-semibold text-slate-800">
+              Certificate Verification
+            </h3>
+
+            <p className="text-sm text-slate-500 mt-2">
+              Check the authenticity of a certificate.
+            </p>
+
+            <button
+              onClick={() => router.push("/verify")}
+              className="text-indigo-700 font-semibold text-sm mt-4 hover:underline"
+            >
+              Verify Certificate â†’
+            </button>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl border border-slate-200">
+            <div className="bg-blue-100 text-blue-700 p-3 rounded-lg w-fit mb-4">
+              <User size={25} />
+            </div>
+
+            <h3 className="font-semibold text-slate-800">
+              My Profile
+            </h3>
+
+            <p className="text-sm text-slate-500 mt-2">
+              View your registered account information.
+            </p>
+
+            <p className="text-xs text-slate-400 mt-4">
+              {user.email}
+            </p>
+          </div>
+        </div>
+
+        {/* My Certificates Section */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6 mt-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="bg-indigo-100 text-indigo-700 p-3 rounded-lg">
+                <Award size={25} />
+              </div>
+
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  My Certificates
+                </h3>
+                <p className="text-sm text-slate-500">
+                  Your certificates issued by the institution
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleRefresh}
+              disabled={certificateLoading}
+              className="flex items-center justify-center gap-2 px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw
+                size={16}
+                className={certificateLoading ? "animate-spin" : ""}
+              />
+              Refresh
+            </button>
+          </div>
+
+          {certificateLoading ? (
+            <div className="text-center py-10">
+              <RefreshCw
+                className="animate-spin mx-auto text-indigo-600 mb-3"
+                size={28}
+              />
+              <p className="text-slate-500">
+                Loading your certificates...
+              </p>
+            </div>
+          ) : error ? (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-5">
+              <p className="text-red-700 font-medium">
+                {error}
+              </p>
+
+              <button
+                onClick={handleRefresh}
+                className="mt-3 text-sm font-semibold text-red-700 hover:underline"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : certificates.length === 0 ? (
+            <div className="text-center py-12">
+              <FileText
+                size={45}
+                className="mx-auto text-slate-300 mb-4"
+              />
+
+              <h4 className="font-semibold text-slate-700">
+                No Certificates Yet
+              </h4>
+
+              <p className="text-sm text-slate-500 mt-2">
+                Your certificates will appear here once your
+                institution issues them.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {certificates.map((certificate) => (
+                <div
+                  key={certificate._id}
+                  className="border border-slate-200 rounded-xl p-5 hover:border-indigo-300 transition"
+                >
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                      <div className="bg-indigo-50 text-indigo-700 p-3 rounded-lg">
+                        <FileText size={25} />
+                      </div>
+
+                      <div>
+                        <h4 className="font-bold text-slate-900">
+                          {certificate.certificateTitle}
+                        </h4>
+
+                        <p className="text-sm text-slate-500 mt-1">
+                          Certificate ID: {certificate.certificateId}
+                        </p>
+
+                        <p className="text-sm text-slate-600 mt-2">
+                          Course: {certificate.course}
+                        </p>
+
+                        <p className="text-sm text-slate-600 mt-1">
+                          Department: {certificate.department}
+                        </p>
+
+                        <p className="text-sm text-slate-500 mt-1">
+                          Issued: {formatDate(certificate.issueDate)}
+                        </p>
+
+                        {certificate.institution && (
+                          <p className="text-sm text-slate-500 mt-1">
+                            Institution: {certificate.institution.institutionName}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-start md:items-end gap-3">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          certificate.status === "Issued"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-red-100 text-red-700"
+                        }`}
+                      >
+                        {certificate.status}
+                      </span>
+
+                      {certificate.fileUrl && (
+                        <a
+                          href={getCertificateUrl(certificate.fileUrl)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                        >
+                          View Certificate
+                          <ExternalLink size={15} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Student Account Information */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6 mt-8">
+          <div className="flex items-center gap-3 mb-5">
+            <GraduationCap className="text-indigo-700" size={25} />
+
+            <h3 className="text-lg font-bold text-slate-900">
+              Student Account Information
+            </h3>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-5">
+            <div>
+              <p className="text-sm text-slate-500">
+                Student Name
+              </p>
+              <p className="font-semibold text-slate-800 mt-1">
+                {user.name}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-500">
+                Email Address
+              </p>
+              <p className="font-semibold text-slate-800 mt-1">
+                {user.email}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-500">
+                Account Type
+              </p>
+              <p className="font-semibold text-slate-800 mt-1">
+                Student
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-500">
+                Account Status
+              </p>
+              <p className="text-green-700 font-semibold mt-1">
+                Active
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\student\login\page.tsx ==========
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  ShieldCheck,
+  GraduationCap,
+  Lock,
+  Mail,
+  UserRound,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+
+export default function StudentLogin() {
+  const router = useRouter();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/auth/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email.trim().toLowerCase(),
+            password,
+            role: "student",
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Login failed");
+      }
+
+      localStorage.setItem("blockcert_token", data.token);
+      localStorage.setItem(
+        "blockcert_user",
+        JSON.stringify(data.user)
+      );
+
+      router.replace("/student/dashboard");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to server."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-slate-950 flex items-center justify-center p-5">
+      <div className="w-full max-w-5xl grid md:grid-cols-2 bg-white rounded-2xl overflow-hidden shadow-2xl">
+
+        {/* Left panel */}
+        <div className="bg-indigo-950 text-white p-10 md:p-14 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-12">
+              <div className="bg-indigo-500 p-3 rounded-xl">
+                <ShieldCheck size={30} />
+              </div>
+              <span className="text-2xl font-bold">BlockCert</span>
+            </div>
+
+            <h1 className="text-4xl font-bold leading-tight mb-5">
+              Your Academic Achievements, Securely Verified.
+            </h1>
+
+            <p className="text-indigo-100 leading-7">
+              Access your academic certificates, check their
+              authenticity and view your verified educational
+              records in one secure place.
+            </p>
+          </div>
+
+          <div className="mt-12 text-sm text-indigo-200">
+            Â© 2026 BlockCert. All rights reserved.
+          </div>
+        </div>
+
+        {/* Right panel */}
+        <div className="p-8 md:p-14 flex flex-col justify-center">
+          <div className="mb-8">
+            <div className="w-14 h-14 bg-indigo-100 text-indigo-700 rounded-xl flex items-center justify-center mb-5">
+              <GraduationCap size={30} />
+            </div>
+
+            <h2 className="text-3xl font-bold text-slate-900">
+              Student Login
+            </h2>
+
+            <p className="text-slate-500 mt-2">
+              Sign in to access your academic certificates.
+            </p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Student Email
+              </label>
+
+              <div className="relative">
+                <Mail
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your registered email"
+                  className="w-full border border-slate-300 rounded-lg py-3 pl-11 pr-4 text-slate-900 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Password
+              </label>
+
+              <div className="relative">
+                <Lock
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="w-full border border-slate-300 rounded-lg py-3 pl-11 pr-12 text-slate-900 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3.5 text-slate-400"
+                >
+                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-indigo-700 hover:bg-indigo-800 disabled:bg-indigo-400 text-white font-semibold py-3 rounded-lg transition"
+            >
+              {loading ? "Signing in..." : "Sign In"}
+            </button>
+          </form>
+
+          {/* Student registration link */}
+          <div className="mt-7 text-center text-sm text-slate-500">
+            <UserRound size={17} className="inline mr-1" />
+            Don't have a student account?
+
+            <Link
+              href="/student/register"
+              className="block mt-2 text-indigo-700 font-semibold hover:underline"
+            >
+              Create Student Account â†’
+            </Link>
+          </div>
+
+          <Link
+            href="/"
+            className="text-center text-indigo-700 hover:underline mt-6 text-sm"
+          >
+            â† Back to Home
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
+========== D:\Blockchain-Certificate-Verification\frontend\app\student\register\page.tsx ==========
+
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  ShieldCheck,
+  GraduationCap,
+  User,
+  Mail,
+  Lock,
+  Phone,
+  BookOpen,
+  Building2,
+  Hash,
+  Eye,
+  EyeOff,
+  CheckCircle,
+} from "lucide-react";
+
+interface Institution {
+  _id: string;
+  institutionName: string;
+  institutionCode: string;
+}
+
+export default function StudentRegister() {
+  const router = useRouter();
+
+  const [institutions, setInstitutions] = useState<Institution[]>([]);
+  const [loadingInstitutions, setLoadingInstitutions] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [form, setForm] = useState({
+    studentName: "",
+    registerNumber: "",
+    email: "",
+    phone: "",
+    department: "",
+    course: "",
+    batch: "",
+    institutionId: "",
+    password: "",
+    confirmPassword: "",
+  });
+
+  useEffect(() => {
+    const fetchInstitutions = async () => {
+      try {
+        const response = await fetch(
+          "http://localhost:5000/api/students/approved-institutions"
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.message || "Unable to load institutions."
+          );
+        }
+
+        setInstitutions(data.institutions || []);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load institutions."
+        );
+      } finally {
+        setLoadingInstitutions(false);
+      }
+    };
+
+    fetchInstitutions();
+  }, []);
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    setForm({
+      ...form,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleRegister = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (form.password.length < 6) {
+      setError("Password must contain at least 6 characters.");
+      return;
+    }
+
+    if (form.password !== form.confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/auth/register/student",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            studentName: form.studentName.trim(),
+            registerNumber: form.registerNumber.trim(),
+            email: form.email.trim().toLowerCase(),
+            phone: form.phone.trim(),
+            department: form.department.trim(),
+            course: form.course.trim(),
+            batch: form.batch.trim(),
+            institutionId: form.institutionId,
+            password: form.password,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Student registration failed."
+        );
+      }
+
+      setSuccess(
+        "Registration successful! You can now log in using your email and password."
+      );
+
+      setForm({
+        studentName: "",
+        registerNumber: "",
+        email: "",
+        phone: "",
+        department: "",
+        course: "",
+        batch: "",
+        institutionId: "",
+        password: "",
+        confirmPassword: "",
+      });
+
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputClass =
+    "w-full border border-slate-300 rounded-lg py-3 px-4 pl-11 text-slate-900 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100";
+
+  return (
+    <main className="min-h-screen bg-slate-950 flex items-center justify-center p-5">
+      <div className="w-full max-w-6xl grid md:grid-cols-2 bg-white rounded-2xl overflow-hidden shadow-2xl">
+
+        {/* Left panel */}
+        <div className="bg-indigo-950 text-white p-10 md:p-14 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-12">
+              <div className="bg-indigo-500 p-3 rounded-xl">
+                <ShieldCheck size={30} />
+              </div>
+              <span className="text-2xl font-bold">
+                BlockCert
+              </span>
+            </div>
+
+            <h1 className="text-4xl font-bold leading-tight mb-5">
+              Your Academic Journey Starts Here.
+            </h1>
+
+            <p className="text-indigo-100 leading-7">
+              Create your secure student account and access
+              your academic certificates whenever you need them.
+            </p>
+
+            <div className="mt-10 space-y-5">
+              <div className="flex items-center gap-3">
+                <CheckCircle className="text-green-400" />
+                <span className="text-indigo-100">
+                  Secure student registration
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <CheckCircle className="text-green-400" />
+                <span className="text-indigo-100">
+                  Digital academic certificates
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <CheckCircle className="text-green-400" />
+                <span className="text-indigo-100">
+                  Easy certificate verification
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-12 text-sm text-indigo-200">
+            Â© 2026 BlockCert. All rights reserved.
+          </p>
+        </div>
+
+        {/* Right panel */}
+        <div className="p-8 md:p-12">
+          <div className="mb-7">
+            <div className="w-14 h-14 bg-indigo-100 text-indigo-700 rounded-xl flex items-center justify-center mb-5">
+              <GraduationCap size={30} />
+            </div>
+
+            <h2 className="text-3xl font-bold text-slate-900">
+              Student Registration
+            </h2>
+
+            <p className="text-slate-500 mt-2">
+              Create your BlockCert student account.
+            </p>
+          </div>
+
+          <form onSubmit={handleRegister} className="space-y-4">
+
+            {/* Student name */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Student Name
+              </label>
+              <div className="relative">
+                <User
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+                <input
+                  name="studentName"
+                  value={form.studentName}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter your full name"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Register number */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Register Number
+              </label>
+              <div className="relative">
+                <Hash
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+                <input
+                  name="registerNumber"
+                  value={form.registerNumber}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter your register number"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Email */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Email Address
+              </label>
+              <div className="relative">
+                <Mail
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+                <input
+                  type="email"
+                  name="email"
+                  value={form.email}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter your email"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Phone */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Phone Number
+              </label>
+              <div className="relative">
+                <Phone
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+                <input
+                  type="tel"
+                  name="phone"
+                  value={form.phone}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter your phone number"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Department */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Department
+              </label>
+              <div className="relative">
+                <BookOpen
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+                <input
+                  name="department"
+                  value={form.department}
+                  onChange={handleChange}
+                  required
+                  placeholder="e.g. Computer Science"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Course */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Course
+              </label>
+              <div className="relative">
+                <GraduationCap
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+                <input
+                  name="course"
+                  value={form.course}
+                  onChange={handleChange}
+                  required
+                  placeholder="e.g. M.Tech Full Stack"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Batch */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Batch
+              </label>
+              <div className="relative">
+                <BookOpen
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+                <input
+                  name="batch"
+                  value={form.batch}
+                  onChange={handleChange}
+                  required
+                  placeholder="e.g. 2025-2027"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Institution dropdown */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Select Institution
+              </label>
+
+              <div className="relative">
+                <Building2
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+
+                <select
+                  name="institutionId"
+                  value={form.institutionId}
+                  onChange={handleChange}
+                  required
+                  disabled={loadingInstitutions || institutions.length === 0}
+                  className={inputClass}
+                >
+                  <option value="">
+                    {loadingInstitutions
+                      ? "Loading institutions..."
+                      : institutions.length === 0
+                      ? "No approved institutions available"
+                      : "Select your institution"}
+                  </option>
+
+                  {institutions.map((institution) => (
+                    <option
+                      key={institution._id}
+                      value={institution._id}
+                    >
+                      {institution.institutionName} (
+                      {institution.institutionCode})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Password
+              </label>
+
+              <div className="relative">
+                <Lock
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  value={form.password}
+                  onChange={handleChange}
+                  required
+                  minLength={6}
+                  placeholder="Create a password"
+                  className={inputClass}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3.5 text-slate-400"
+                >
+                  {showPassword ? (
+                    <EyeOff size={19} />
+                  ) : (
+                    <Eye size={19} />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Confirm password */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Confirm Password
+              </label>
+
+              <div className="relative">
+                <Lock
+                  className="absolute left-3 top-3.5 text-slate-400"
+                  size={19}
+                />
+
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  value={form.confirmPassword}
+                  onChange={handleChange}
+                  required
+                  placeholder="Confirm your password"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            {/* Success message */}
+            {success && (
+              <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg text-sm">
+                {success}
+
+                <button
+                  type="button"
+                  onClick={() => router.push("/student/login")}
+                  className="block mt-2 font-semibold underline"
+                >
+                  Go to Student Login
+                </button>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || loadingInstitutions || institutions.length === 0}
+              className="w-full bg-indigo-700 hover:bg-indigo-800 disabled:bg-indigo-400 text-white font-semibold py-3 rounded-lg transition"
+            >
+              {loading ? "Creating Account..." : "Create Student Account"}
+            </button>
+          </form>
+
+          <p className="text-center text-sm text-slate-500 mt-6">
+            Already have an account?{" "}
+            <Link
+              href="/student/login"
+              className="text-indigo-700 font-semibold hover:underline"
+            >
+              Sign In
+            </Link>
+          </p>
+
+          <Link
+            href="/"
+            className="block text-center text-indigo-700 hover:underline mt-5 text-sm"
+          >
+            â† Back to Home
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
+========== .\app\layout.tsx ==========
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full flex flex-col">{children}</body>
+    </html>
+  );
+}
+
+
+========== ..\backend\controllers\authController.js ==========
+
+const User = require("../models/User");
+const Institution = require("../models/Institution");
+const Student = require("../models/Student");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+
+// Generate JWT token
+const generateToken = (user) => {
+  return jwt.sign(
+    {
+      id: user._id,
+      role: user.role,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "1d" }
+  );
+};
+
+// Register institution account
+exports.registerInstitution = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      password,
+      institutionName,
+      institutionCode,
+      phone,
+      address,
+    } = req.body;
+
+    if (
+      !name || !email || !password || !institutionName ||
+      !institutionCode || !phone || !address
+    ) {
+      return res.status(400).json({
+        message: "Please fill all required fields",
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must contain at least 6 characters",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
+
+    const existingInstitution = await Institution.findOne({
+      $or: [
+        { email: normalizedEmail },
+        { institutionCode: institutionCode.toUpperCase() },
+      ],
+    });
+
+    if (existingUser || existingInstitution) {
+      return res.status(409).json({
+        message: "Email or institution code already exists",
+      });
+    }
+
+    const institution = await Institution.create({
+      institutionName,
+      institutionCode,
+      email: normalizedEmail,
+      phone,
+      address,
+      isApproved: false,
+    });
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await User.create({
+      name,
+      email: normalizedEmail,
+      password: hashedPassword,
+      role: "institution",
+      institution: institution._id,
+    });
+
+    res.status(201).json({
+      message: "Institution registered. Awaiting approval.",
+      institutionId: institution._id,
+      userId: user._id,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Institution registration failed",
+      error: error.message,
+    });
+  }
+};
+
+// Student registration
+exports.registerStudent = async (req, res) => {
+  try {
+    const {
+      studentName,
+      registerNumber,
+      email,
+      phone,
+      department,
+      course,
+      batch,
+      institutionId,
+      password,
+    } = req.body;
+
+    if (
+      !studentName || !registerNumber || !email || !department ||
+      !course || !batch || !institutionId || !password
+    ) {
+      return res.status(400).json({
+        message: "Please fill all required fields",
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must contain at least 6 characters",
+      });
+    }
+
+    const institution = await Institution.findOne({
+      _id: institutionId,
+      isApproved: true,
+      isActive: true,
+    });
+
+    if (!institution) {
+      return res.status(400).json({
+        message: "Institution not found or not approved",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
+
+    const existingStudent = await Student.findOne({
+      registerNumber: registerNumber.toUpperCase(),
+    });
+
+    if (existingUser || existingStudent) {
+      return res.status(409).json({
+        message: "Email or register number already exists",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await User.create({
+      name: studentName,
+      email: normalizedEmail,
+      password: hashedPassword,
+      role: "student",
+    });
+
+    const student = await Student.create({
+      studentName,
+      registerNumber,
+      email: normalizedEmail,
+      phone,
+      department,
+      course,
+      batch,
+      institution: institution._id,
+      user: user._id,
+    });
+
+    user.student = student._id;
+    await user.save();
+
+    res.status(201).json({
+      message: "Student registered successfully",
+      studentId: student._id,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Student registration failed",
+      error: error.message,
+    });
+  }
+};
+
+// Login for System Admin, Institution and Student
+exports.login = async (req, res) => {
+  try {
+    const { email, password, role } = req.body;
+
+    if (!email || !password || !role) {
+      return res.status(400).json({
+        message: "Email, password and role are required",
+      });
+    }
+
+    if (!["admin", "institution", "student"].includes(role)) {
+      return res.status(400).json({
+        message: "Invalid login role",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+      role,
+    });
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    // Institution approval check
+    if (role === "institution") {
+      const institution = await Institution.findById(
+        user.institution
+      );
+
+      if (
+        !institution ||
+        !institution.isApproved ||
+        !institution.isActive
+      ) {
+        return res.status(403).json({
+          message: "Institution account is awaiting approval or inactive",
+        });
+      }
+    }
+
+    // Admin accounts are created securely through the
+    // backend setup process, not through public registration.
+
+    const token = generateToken(user);
+
+    return res.json({
+      message: "Login successful",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Login failed",
+      error: error.message,
+    });
+  }
+};
+
+
+========== ..\backend\middleware\authMiddleware.js ==========
+
+const jwt = require("jsonwebtoken");
+const User = require("../models/User");
+
+exports.protect = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        message: "Authentication token is required",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await User.findById(decoded.id).select("-password");
+
+    if (!user || !user.isActive || user.role !== decoded.role) {
+      return res.status(401).json({
+        message: "Invalid or inactive account",
+      });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      message: "Invalid or expired authentication token",
+    });
+  }
+};
+
+// System Admin access
+exports.adminOnly = (req, res, next) => {
+  if (req.user && req.user.role === "admin") {
+    return next();
+  }
+
+  return res.status(403).json({
+    message: "System Admin access required",
+  });
+};
+
+// Institution access
+exports.institutionOnly = (req, res, next) => {
+  if (req.user && req.user.role === "institution") {
+    return next();
+  }
+
+  return res.status(403).json({
+    message: "Institution access required",
+  });
+};
+
+// Student access
+exports.studentOnly = (req, res, next) => {
+  if (req.user && req.user.role === "student") {
+    return next();
+  }
+
+  return res.status(403).json({
+    message: "Student access required",
+  });
+};
+
